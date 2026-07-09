@@ -1,93 +1,78 @@
-# A.L.I.S. — AI Lead Intelligence System
+# A.L.I.S. — Automated Lead Intelligence System
 
-> AI-powered lead scoring engine for the DACH market. Detects recruiting failure signals and scores companies automatically via a weighted signal engine.
+A signal-based lead scoring pipeline built in n8n. It scrapes open job postings, enriches the companies behind them, scores each company against a set of weighted buying signals, and tiers them Hot / Warm / Cold for outbound — with a full audit trail per company and no manual qualification.
 
-![Status](https://img.shields.io/badge/Status-Case%20Study-blue?style=flat)
-![Market](https://img.shields.io/badge/Market-DACH-lightgrey?style=flat)
-![Stack](https://img.shields.io/badge/Stack-n8n%20%7C%20Apollo.io%20%7C%20Airtable-purple?style=flat)
-![Type](https://img.shields.io/badge/Type-Self--Initiated-orange?style=flat)
+Built as a portfolio case study for a recruitment ICP ("HEAD|MATCH"): companies that are actively failing to fill senior roles are the buying signal.
 
 ---
 
-## Overview
+## The problem it solves
 
-A.L.I.S. (AI Lead Intelligence System) is a self-initiated case study building an intelligent lead qualification engine purpose-built for the **DACH market**. Rather than scoring leads by firmographic data alone, A.L.I.S. detects **9 recruiting failure signals** derived from LinkedIn activity and Apollo.io enrichment data — surfacing companies that are actively scaling but struggling to hire.
-
-The output: a clean Hot / Warm / Cold classification per company, updated automatically as new signals are detected.
+Lead qualification is normally a person reading company signals by hand — is this company hiring, are they funded, is a senior role sitting open — and guessing whether it's worth outreach. That judgment is a repeatable rule, not real intuition. A.L.I.S. makes the rule explicit and runs it automatically, so the qualification work happens without a human doing it forty times a day.
 
 ---
 
-## Signal Detection
+## Architecture
 
-A.L.I.S. monitors 9 proprietary recruiting failure signals including:
+The pipeline runs in stages, left to right on the canvas:
 
-- Repeated job postings for the same role (hiring velocity mismatch)
-- Extended time-to-fill patterns across departments
-- Sudden headcount spikes without corresponding senior hires
-- LinkedIn engagement patterns indicating talent brand weakness
-- Role mismatch signals between job titles and company growth stage
-- ...and 4 additional signals derived from DACH-specific hiring behavior
+**1. Input seed**
+A keyword and category (e.g. "Software Engineer" / "Jobs") define the search.
 
-Each signal is weighted independently. The final score is computed via a **weighted signal aggregation engine**, producing a normalized score mapped to Hot / Warm / Cold tiers.
+**2. Job scraping — PhantomBuster**
+Pulls open job postings and the companies posting them.
 
----
+**3. Group by company**
+A Code node collapses multiple job posts into one record per company, collecting all job titles, job count, and LinkedIn slug.
 
-## System Architecture
+**4. Filter — Germany + senior roles**
+Narrows to the target market and to companies with senior-level openings.
 
-```
-LinkedIn Data ──┐
-               ├──► Data Enrichment (Apollo.io + PhantomBuster)
-Apollo.io ─────┘              │
-                              ▼
-                   Signal Detection Engine (n8n)
-                   [9 weighted failure signals]
-                              │
-                              ▼
-                   Weighted Scoring Model
-                   [Hot / Warm / Cold]
-                              │
-                              ▼
-                   Airtable CRM Output
-                   [Enriched lead records + scores]
-```
+**5. Enrichment — Apollo + PhantomBuster profiles**
+Company-level data (employee count, funding, growth) and people-level data (leadership, board members) are pulled in for scoring.
+
+**6. Signal scoring layer**
+Each company is scored against weighted buying signals (below). Scores are summed into a total.
+
+**7. Tiering**
+Total score maps to a tier: **Hot ≥ 20, Warm ≥ 10, Cold < 10.** Companies are sorted by score descending.
+
+**8. Output — Airtable + Google Sheets**
+Scored, tiered companies land in Airtable ("Matchday" base) with every signal value stored per record — the audit trail. Pipedrive is wired for downstream CRM handoff.
 
 ---
 
-## Tech Stack
+## The signals
 
-| Layer | Technology |
-|---|---|
-| Orchestration | n8n |
-| Lead Data | Apollo.io |
-| LinkedIn Scraping | PhantomBuster |
-| Data Storage & CRM | Airtable |
-| Signal Source | LinkedIn activity data |
-| Architecture | Automated multi-source enrichment pipeline |
+Each signal is a specific, checkable condition with a weight reflecting how strongly it indicates a company is stuck filling a senior role.
 
----
+| # | Signal | Weight | Logic |
+|---|--------|--------|-------|
+| 1 | Open 60+ days | 7 | Role posted 60+ days ago — trying and failing to fill for 2+ months |
+| 2 | Role reposted | 8 | Same role posted again — first attempt didn't land |
+| 3 | Generalist agency | 6 | Posted by a generic staffing/consulting agency with no specialist search capability |
+| 4 | Senior role open | 7 | A CTO / VP Eng / Head of Eng / Principal / Tech Lead role is open — leadership gap |
+| 5 | HR team ≤ 3% + 100+ employees + senior role open | 6 | Under-resourced HR carrying a senior search |
+| 6 | Growing 15%+ YoY + senior role open | 9 | Scaling fast with a leadership gap — classic HEAD\|MATCH situation |
+| 7 | HR team ≤ 5% + 100+ employees + senior role open | 8 | Placeholder likely covering a missing senior hire |
+| 8 | CEO / founder personally posting | — | Identified by AI agent from the employee list — no dedicated hiring function |
+| 9 | Board / investor involvement | — | Board or investor-level people present — pressure from above on the hire |
+| 10 | Average tenure < 2.5 years | 7 | Retention problem compounding the hiring problem |
 
-## Output
-
-Each processed company record in Airtable includes:
-
-- **Lead Score** — Hot / Warm / Cold classification
-- **Signal Breakdown** — which of the 9 signals were triggered
-- **Signal Strength** — weighted score per signal
-- **Enrichment Data** — firmographics, headcount, funding stage, tech stack (via Apollo)
-- **LinkedIn Signals** — activity patterns and hiring behavior data
+Signals 8 and 9 are extracted by an AI agent (structured JSON output, German-title-aware: Geschäftsführer, Aufsichtsrat, Beirat) rather than by rule, because they require reading a messy employee list rather than checking a field.
 
 ---
 
-## Case Study Context
+## Stack
 
-A.L.I.S. was designed as a **self-initiated portfolio project** to demonstrate:
+n8n · PhantomBuster · Apollo · OpenAI (signal extraction agent) · Airtable · Google Sheets · Pipedrive
 
-- Applied AI in B2B sales infrastructure
-- Signal-based scoring as an alternative to rules-based qualification
-- Automated enrichment pipeline design for DACH outbound motions
-
-Full case study documentation available in the [Portfolio Drive](https://drive.google.com/drive/folders/16IQsA1VIEQMihnZebqVT_On0AmO6vvXv).
+Node breakdown: 13 Code nodes, 11 HTTP Request, 5 Airtable, 5 Google Sheets, 2 AI agents, plus filtering, merging, and batching logic.
 
 ---
 
-*Built by [Aria Irani](https://www.linkedin.com/in/aria-irani-7a9563261) · Berlin*
+## Notes
+
+- This repository contains the workflow structure. All credentials and API keys have been replaced with placeholders — supply your own in n8n's credential store to run it.
+- Signals 1–4 and 10 are wired into the live scoring calculation; signals 5–9 are implemented in the enrichment and documentation layer and represent the scoring model's full design. The weighting model is configurable.
+- A.L.I.S. is a methodology and a configurable framework. This is one instantiation, tuned to a recruitment ICP. The same architecture rescopes to any ICP by swapping the signals and weights.
